@@ -6,8 +6,9 @@ on:
     branches: main
 
 env:
-  scheduled_jobs: (215583)
   account_id: ${{ secrets.DBT_CLOUD_ACCOUNT_ID }}
+  dbt_cloud_api_key: ${{ secrets.DBT_CLOUD_API_KEY }}
+  scheduled_jobs: (215583)
   manual_dbt_job_id: 216303
 
 jobs:
@@ -29,7 +30,7 @@ jobs:
           for job in "${jobs[@]}"
           do
             echo "===== Calling dbt Cloud API for details of job ${job} ====="
-            RESPONSE=$(curl -H "Authorization:Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+            RESPONSE=$(curl -H "Authorization:Token ${{ env.dbt_cloud_api_key }}" \
                       https://cloud.getdbt.com/api/v2/accounts/${account_id}/jobs/${job}/)
             echo "===== Response from dbt Cloud API ====="
             echo "$RESPONSE"
@@ -87,7 +88,7 @@ jobs:
             echo "===== Calling dbt Cloud API to turn schedule off for job ${job} ====="
             PAYLOAD=$(<job_${job}.json)
             PAYLOAD=$(jq '.triggers.schedule = false' <<<"$PAYLOAD")
-            RESPONSE=$(curl -H "Authorization: Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+            RESPONSE=$(curl -H "Authorization: Token ${{ env.dbt_cloud_api_key }}" \
                       -H "Content-Type:application/json" \
                       -d "$PAYLOAD" \
                       https://cloud.getdbt.com/api/v2/accounts/${account_id}/jobs/${job}/)
@@ -104,7 +105,7 @@ jobs:
           for job in "${jobs[@]}"
           do
             echo "===== Checking job ${job} ====="
-            RESPONSE=$(curl -H "Authorization: Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+            RESPONSE=$(curl -H "Authorization: Token ${{ env.dbt_cloud_api_key }}" \
                       "https://cloud.getdbt.com/api/v2/accounts/${account_id}/runs/?job_definition_id=${job}&order_by=-created_at&limit=10")
             echo "===== Response from dbt Cloud API ====="
             echo "$RESPONSE"
@@ -118,7 +119,7 @@ jobs:
               if [[ $IN_PROGRESS == true ]]
               then
                 echo "===== Cancelling run ${RUN_ID} ====="
-                RESPONSE=$(curl -X POST -H "Authorization: Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+                RESPONSE=$(curl -X POST -H "Authorization: Token ${{ env.dbt_cloud_api_key }}" \
                           https://cloud.getdbt.com/api/v2/accounts/${account_id}/runs/${RUN_ID}/cancel/)
                 echo "===== Response from dbt Cloud API ====="
                 echo "$RESPONSE"
@@ -131,7 +132,7 @@ jobs:
         run: |
           job_id=$manual_dbt_job_id
           echo "===== Calling dbt Cloud API to run auto deploy job ====="
-          RESPONSE=$(curl -H "Authorization: Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+          RESPONSE=$(curl -H "Authorization: Token ${{ env.dbt_cloud_api_key }}" \
                     -H "Content-Type:application/json" \
                     -d '{ 
                       "cause": "Auto deploy", 
@@ -146,7 +147,7 @@ jobs:
           while true
           do
             sleep 30
-            RESPONSE=$(curl -H "Authorization: Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+            RESPONSE=$(curl -H "Authorization: Token ${{ env.dbt_cloud_api_key }}" \
                       https://cloud.getdbt.com/api/v2/accounts/${account_id}/runs/${RUN_ID}/)
             echo "===== Response from dbt Cloud API ====="
             echo "$RESPONSE"
@@ -169,7 +170,7 @@ jobs:
           do
             echo "===== Calling dbt Cloud API to turn on job ${job} ====="
             PAYLOAD=$(<job_${job}.json)
-            RESPONSE=$(curl -v -H "Authorization: Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+            RESPONSE=$(curl -v -H "Authorization: Token ${{ env.dbt_cloud_api_key }}" \
                       -H "Content-Type:application/json" \
                       -d "$PAYLOAD" \
                       https://cloud.getdbt.com/api/v2/accounts/${account_id}/jobs/${job}/)
