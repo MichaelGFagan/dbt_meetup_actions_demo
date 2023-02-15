@@ -1,0 +1,7 @@
+selectors:
+  - name: auto_deploy
+    definition:
+      intersection:
+        - method: state
+          value: modified.body
+          children: true
