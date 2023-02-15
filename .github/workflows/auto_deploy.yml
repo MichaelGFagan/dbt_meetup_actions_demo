@@ -1,0 +1,180 @@
+name: Auto deploy after merge
+on:
+  pull_request:
+    types:
+      - closed
+    branches: main
+
+env:
+  scheduled_jobs: (215583)
+  account_id: ${{ secrets.DBT_CLOUD_ACCOUNT_ID }}
+  manual_dbt_job_id: 216303
+
+jobs:
+  auto_deploy:
+    name: Auto deploy changes
+    runs-on: ubuntu-latest
+    if: |
+      github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Pull job payloads
+        id: pull_job_payloads
+        run: |
+          # `set -f` prevents glob expansion, which is necessary because bash
+          # (or bash within GitHub workflows) will expand the `*`s in a cron
+          # string (e.g., "5 * * * * ") with the `job_{job_id}.json`s and break
+          # the API call
+          set -f
+          jobs=${{ env.scheduled_jobs }}
+          for job in "${jobs[@]}"
+          do
+            echo "===== Calling dbt Cloud API for details of job ${job} ====="
+            RESPONSE=$(curl -H "Authorization:Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+                      https://cloud.getdbt.com/api/v2/accounts/${account_id}/jobs/${job}/)
+            echo "===== Response from dbt Cloud API ====="
+            echo "$RESPONSE"
+            STATUSCODE=$(echo "$RESPONSE" | jq '.status.code')
+            if [[ $STATUSCODE != 200 ]]; then bash -c "exit 1"; fi
+            generate_post_data()
+            {
+              cat <<-EOF
+            {
+              "account_id": ${account_id},
+              "project_id": $(echo "$RESPONSE" | jq '.data.project_id'),
+              "environment_id": $(echo "$RESPONSE" | jq '.data.environment_id'),
+              "dbt_version": "",
+              "name": $(echo "$RESPONSE" | jq '.data.name'),
+              "id": ${job},
+              "state": $(echo "$RESPONSE" | jq '.data.state'),
+              "settings": {
+                  "threads": $(echo "$RESPONSE" | jq '.data.settings.threads'),
+                  "target_name": $(echo "$RESPONSE" | jq '.data.settings.target_name')
+              },
+              "execute_steps": $(echo "$RESPONSE" | jq '.data.execute_steps'),
+              "triggers": {
+                  "schedule": $(echo "$RESPONSE" | jq '.data.triggers.schedule'),
+                  "github_webhook": $(echo "$RESPONSE" | jq '.data.triggers.github_webhook')
+              },
+              "schedule": {
+                  "cron": $(echo "$RESPONSE" | jq '.data.schedule.cron'),
+                  "date": {
+                      "type": $(echo "$RESPONSE" | jq '.data.schedule.date.type'), 
+                      "cron": $(echo "$RESPONSE" | jq '.data.schedule.date.cron')
+                  },
+                  "time": {
+                      "type": $(echo "$RESPONSE" | jq '.data.schedule.time.type'),
+                      "interval": $(echo "$RESPONSE" | jq '.data.schedule.time.interval')
+                  }
+              }
+            }
+          EOF
+            }
+            echo "===== Saving job details for job ${job} to job_${job}.json ====="
+            PAYLOAD=$(generate_post_data)
+            echo $PAYLOAD
+            if [[ $(echo $PAYLOAD | jq '.schedule.date.cron') == null ]]
+            then
+              PAYLOAD=$(jq 'del(.schedule.date.cron)' <<<"$PAYLOAD")
+            fi
+            echo $PAYLOAD > job_${job}.json
+          done
+      - name: Turn off scheduled jobs
+        run: |
+          set -f
+          jobs=${{ env.scheduled_jobs }}
+          for job in "${jobs[@]}"
+          do
+            echo "===== Calling dbt Cloud API to turn schedule off for job ${job} ====="
+            PAYLOAD=$(<job_${job}.json)
+            PAYLOAD=$(jq '.triggers.schedule = false' <<<"$PAYLOAD")
+            RESPONSE=$(curl -H "Authorization: Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+                      -H "Content-Type:application/json" \
+                      -d "$PAYLOAD" \
+                      https://cloud.getdbt.com/api/v2/accounts/${account_id}/jobs/${job}/)
+            echo "===== Response from dbt Cloud API ====="
+            echo "$RESPONSE"
+            STATUSCODE=$(echo "$RESPONSE" | jq '.status.code')
+            if [[ $STATUSCODE != 200 ]]; then bash -c "exit 1"; fi
+          done
+      - name: Cancel any running jobs
+        run: |
+          set -f
+          jobs=${{ env.scheduled_jobs }}
+          echo "===== Cancel any active runs from scheduled jobs ====="
+          for job in "${jobs[@]}"
+          do
+            echo "===== Checking job ${job} ====="
+            RESPONSE=$(curl -H "Authorization: Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+                      "https://cloud.getdbt.com/api/v2/accounts/${account_id}/runs/?job_definition_id=${job}&order_by=-created_at&limit=10")
+            echo "===== Response from dbt Cloud API ====="
+            echo "$RESPONSE"
+            STATUSCODE=$(echo "$RESPONSE" | jq '.status.code')
+            if [[ $STATUSCODE != 200 ]]; then bash -c "exit 1"; fi
+            DATA=$(echo "$RESPONSE" | jq '.data')
+            echo "$DATA" | jq -c -r '.[]' | while read run
+            do
+              RUN_ID=$(echo "$run" | jq '.id')
+              IN_PROGRESS=$(echo "$run" | jq '.in_progress')
+              if [[ $IN_PROGRESS == true ]]
+              then
+                echo "===== Cancelling run ${RUN_ID} ====="
+                RESPONSE=$(curl -X POST -H "Authorization: Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+                          https://cloud.getdbt.com/api/v2/accounts/${account_id}/runs/${RUN_ID}/cancel/)
+                echo "===== Response from dbt Cloud API ====="
+                echo "$RESPONSE"
+                STATUSCODE=$(echo "$RESPONSE" | jq '.status.code')
+                if [[ $STATUSCODE != 200 ]]; then bash -c "exit 1"; fi
+              fi
+            done
+          done
+      - name: Trigger dbt Cloud job to deploy changed models
+        run: |
+          job_id=$manual_dbt_job_id
+          echo "===== Calling dbt Cloud API to run auto deploy job ====="
+          RESPONSE=$(curl -H "Authorization: Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+                    -H "Content-Type:application/json" \
+                    -d '{ 
+                      "cause": "Auto deploy", 
+                      "git_branch": "main", 
+                      "steps_override": [ "dbt run --selector auto_deploy --full-refresh" ] }' \
+                    https://cloud.getdbt.com/api/v2/accounts/${account_id}/jobs/${job_id}/run/)
+          echo "===== Response from dbt Cloud API ====="
+          echo "$RESPONSE"
+          STATUSCODE=$(echo "$RESPONSE" | jq '.status.code')
+          if [[ $STATUSCODE != 200 ]]; then bash -c "exit 1"; fi
+          RUN_ID=$(echo "$RESPONSE" | jq '.data.id')
+          while true
+          do
+            sleep 30
+            RESPONSE=$(curl -H "Authorization: Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+                      https://cloud.getdbt.com/api/v2/accounts/${account_id}/runs/${RUN_ID}/)
+            echo "===== Response from dbt Cloud API ====="
+            echo "$RESPONSE"
+            IN_PROGRESS=$(echo "$RESPONSE" | jq '.data.in_progress')
+            if [[ $IN_PROGRESS == true ]]
+            then
+              continue
+            else
+              STATUSCODE=$(echo "$RESPONSE" | jq '.status.code')
+              if [[ $STATUSCODE != 200 ]]; then bash -c "exit 1"; fi
+              break
+            fi
+          done
+      - name: Turn scheduled jobs back on
+        if: ${{ always() && steps.pull_job_payloads.outcome == 'success' }}
+        run: |
+          set -f
+          jobs=${{ env.scheduled_jobs }}
+          for job in "${jobs[@]}"
+          do
+            echo "===== Calling dbt Cloud API to turn on job ${job} ====="
+            PAYLOAD=$(<job_${job}.json)
+            RESPONSE=$(curl -v -H "Authorization: Token ${{ secrets.DBTCLOUDAPIKEY }}" \
+                      -H "Content-Type:application/json" \
+                      -d "$PAYLOAD" \
+                      https://cloud.getdbt.com/api/v2/accounts/${account_id}/jobs/${job}/)
+            echo "===== Response from dbt Cloud API ====="
+            echo "$RESPONSE"
+            STATUSCODE=$(echo "$RESPONSE" | jq '.status.code')
+            if [[ $STATUSCODE != 200 ]]; then bash -c "exit 1"; fi
+          done
