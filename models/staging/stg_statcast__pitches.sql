@@ -113,6 +113,8 @@ transformed as (
       , statcast.number_of_extra_bases
 
     from statcast
+    
+    where statcast.game_date < '2022-01-03'
 
 )
 
