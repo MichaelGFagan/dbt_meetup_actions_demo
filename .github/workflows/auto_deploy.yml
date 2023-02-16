@@ -16,7 +16,7 @@ jobs:
   auto_deploy:
     name: Auto deploy changes
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     steps:
       - name: Pull job payloads
         id: pull_job_payloads
