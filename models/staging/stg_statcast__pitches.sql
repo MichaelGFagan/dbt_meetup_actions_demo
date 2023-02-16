@@ -114,7 +114,7 @@ transformed as (
 
     from statcast
     
-    where statcast.game_date < '2022-01-03'
+    
 
 )
 
