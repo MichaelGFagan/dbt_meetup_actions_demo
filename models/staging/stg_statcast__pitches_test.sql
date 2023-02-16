@@ -58,19 +58,6 @@ transformed as (
       , statcast.outs
       , statcast.infield_alignment
       , statcast.outfield_alignment
-      {# , batter.person_id as batter_person_id
-      , pitcher.person_id as pitcher_person_id
-      , catcher.person_id as catcher_person_id
-      , first_base.person_id as first_base_person_id
-      , second_base.person_id as second_base_person_id
-      , third_base.person_id as third_base_person_id
-      , shortstop.person_id as shortstop_person_id
-      , left_field.person_id as left_field_person_id
-      , center_field.person_id as center_field_person_id
-      , right_field.person_id as right_field_person_id
-      , runner_on_first.person_id as runner_on_first_person_id
-      , runner_on_second.person_id as runner_on_second_person_id
-      , runner_on_third.person_id as runner_on_third_person_id #}
       , statcast.batter_mlbam_id
       , statcast.pitcher_mlbam_id 
       , statcast.catcher_mlbam_id
