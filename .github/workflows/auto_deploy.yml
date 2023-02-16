@@ -4,6 +4,7 @@ on:
     types:
       - closed
     branches: main
+  workflow_dispatch:
 
 env:
   account_id: ${{ secrets.DBT_CLOUD_ACCOUNT_ID }}
